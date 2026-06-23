@@ -125,6 +125,7 @@
       <div class="cell"><div class="k">Longitude</div><div class="v" id="rLon">—</div></div>
       <div class="cell"><div class="k">Buffered records</div><div class="v" id="rBuf">—</div></div>
       <div class="cell"><div class="k">Install mode</div><div class="v" id="rInst">—</div></div>
+      <div class="cell"><div class="k">Raw ADC (4-20mA)</div><div class="v" id="rRaw">—</div></div>
       <div class="cell wide"><div class="k">State</div><div class="flags" id="rFlags"></div></div>
     </div>
   </div>
@@ -313,7 +314,8 @@ function onStatus(e){
   const joined=v.getUint8(0), flags=v.getUint8(1), inst=v.getUint8(2), batt=v.getUint8(3);
   const buf=v.getUint32(4,false);
   const lat=v.getInt32(8,false)/1e7, lon=v.getInt32(12,false)/1e7;
-  const psi=v.getInt16(16,false)/10, sats=v.getUint8(18);
+ const psi=v.getInt16(16,false)/10, sats=v.getUint8(18);
+  const rawAdc=(v.byteLength>=22)?v.getInt16(20,false):null;
   $("rJoin").textContent=joined?"Joined":"Not joined";
   $("rBatt").innerHTML=batt+"<small>%</small>";
   $("rPsi").innerHTML=psi.toFixed(1)+" <small>psi</small>";
@@ -322,6 +324,7 @@ function onStatus(e){
   $("rLon").textContent=(flags&0x01)?lon.toFixed(5):"—";
   $("rBuf").textContent=buf;
   $("rInst").textContent=inst?"On":"Off";
+  if(rawAdc!==null) $("rRaw").textContent=rawAdc;
   const f=[]; f.push(tag("GPS fix",flags&0x01));
   f.push(tag("Moving",flags&0x08)); f.push(tag("Motion",flags&0x02));
   $("rFlags").innerHTML=f.join("");
