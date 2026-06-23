@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RAK4631-IIOT — Field Config</title>
+<style>
+  :root{
+    --bg:#eef2f3; --surface:#ffffff; --line:#dbe3e6;
+    --ink:#13262e; --muted:#5d6f77;
+    --accent:#0a7d7d; --accent-ink:#ffffff;
+    --ok:#1f9d57; --warn:#b9590f; --err:#b42318;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --r:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--bg);
+       line-height:1.4;-webkit-font-smoothing:antialiased;padding-bottom:80px}
+  header{position:sticky;top:0;z-index:10;background:var(--surface);
+         border-bottom:1px solid var(--line);padding:12px 16px;
+         display:flex;align-items:center;justify-content:space-between;gap:12px}
+  header h1{font-size:15px;margin:0;letter-spacing:.2px}
+  header .sub{font-size:11px;color:var(--muted);font-family:var(--mono)}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;
+        font-family:var(--mono);padding:5px 10px;border-radius:999px;
+        border:1px solid var(--line);white-space:nowrap}
+  .chip .dot{width:8px;height:8px;border-radius:50%;background:var(--err)}
+  .chip.on{border-color:var(--ok);color:var(--ok)} .chip.on .dot{background:var(--ok)}
+  main{max-width:640px;margin:0 auto;padding:16px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+        padding:16px;margin-bottom:14px}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.12em;
+           color:var(--muted);margin:0 0 12px}
+  .hint{color:var(--muted);font-size:13px;margin:8px 0 0}
+  /* Readout (signature instrument panel) */
+  .readout{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);
+           border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  .cell{background:var(--surface);padding:12px 14px}
+  .cell .k{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+  .cell .v{font-family:var(--mono);font-size:20px;margin-top:3px;font-variant-numeric:tabular-nums}
+  .cell .v small{font-size:12px;color:var(--muted)}
+  .cell.wide{grid-column:1/-1}
+  .flags{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+  .tag{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:6px;
+       background:#eef2f3;color:var(--muted);border:1px solid var(--line)}
+  .tag.hot{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);
+         margin-left:6px;opacity:.25;transition:opacity .15s}
+  .pulse.live{opacity:1}
+  /* Forms */
+  .row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px}
+  .field{flex:1;min-width:120px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  input,select{width:100%;font:inherit;font-size:15px;padding:10px 12px;
+        border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+  input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+  input[type=checkbox]{width:auto}
+  button{font:inherit;font-size:15px;font-weight:600;border:0;border-radius:8px;
+         padding:11px 16px;cursor:pointer;background:var(--accent);color:var(--accent-ink)}
+  button.ghost{background:#fff;color:var(--ink);border:1px solid var(--line);font-weight:500}
+  button.block{width:100%}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .big{font-size:17px;padding:16px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  details{border-top:1px solid var(--line);padding-top:12px;margin-top:4px}
+  details summary{cursor:pointer;font-weight:600;font-size:14px;list-style:none}
+  details summary::-webkit-details-marker{display:none}
+  details summary::before{content:"+ ";color:var(--accent);font-family:var(--mono)}
+  details[open] summary::before{content:"– "}
+  details > *:not(summary){margin-top:12px}
+  .hidden{display:none}
+  /* Log */
+  #log{position:fixed;left:0;right:0;bottom:0;max-height:140px;overflow:auto;
+       background:#0e1c22;color:#cfe;font-family:var(--mono);font-size:12px;
+       padding:8px 12px;border-top:2px solid var(--accent)}
+  #log div{padding:1px 0;white-space:pre-wrap}
+  #log .e{color:#ff9a8a} #log .s{color:#8ce0a8}
+  .unsupported{background:#fff3ed;border:1px solid #f0c6ad;color:#8a3a12;
+               padding:12px;border-radius:var(--r);font-size:13px;margin:16px}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>RAK4631-IIOT</h1>
+    <div class="sub">Field Configuration</div>
+  </div>
+  <span id="conn" class="chip"><span class="dot"></span><span id="connText">Disconnected</span></span>
+</header>
+
+<main>
+  <div id="unsupported" class="unsupported hidden">
+    This browser doesn't support Web Bluetooth. On Android use <b>Chrome</b>; on iPhone use the
+    <b>Bluefly/Bluefy</b> browser. The page must be opened over <b>https</b>.
+  </div>
+
+  <!-- Connect -->
+  <div id="connectCard" class="card">
+    <h2>Connection</h2>
+    <button id="btnConnect" class="block big">Connect to device</button>
+    <p class="hint">Power on the node, then tap Connect and pick <b>RAK4631-IIOT</b>.</p>
+  </div>
+
+  <!-- Unlock -->
+  <div id="authCard" class="card hidden">
+    <h2>Unlock</h2>
+    <div class="row">
+      <div class="field"><label for="pin">PIN</label>
+        <input id="pin" type="number" inputmode="numeric" placeholder="e.g. 4321"></div>
+      <button id="btnAuth">Unlock</button>
+    </div>
+    <p class="hint">Config PIN gives full access; read-only PIN shows diagnostics only.</p>
+  </div>
+
+  <!-- Live readout -->
+  <div id="readCard" class="card hidden">
+    <h2>Live readout <span id="pulse" class="pulse"></span></h2>
+    <div class="readout">
+      <div class="cell"><div class="k">Network</div><div class="v" id="rJoin">—</div></div>
+      <div class="cell"><div class="k">Battery</div><div class="v" id="rBatt">—</div></div>
+      <div class="cell"><div class="k">Pressure</div><div class="v" id="rPsi">—</div></div>
+      <div class="cell"><div class="k">Satellites</div><div class="v" id="rSats">—</div></div>
+      <div class="cell"><div class="k">Latitude</div><div class="v" id="rLat">—</div></div>
+      <div class="cell"><div class="k">Longitude</div><div class="v" id="rLon">—</div></div>
+      <div class="cell"><div class="k">Buffered records</div><div class="v" id="rBuf">—</div></div>
+      <div class="cell"><div class="k">Install mode</div><div class="v" id="rInst">—</div></div>
+      <div class="cell wide"><div class="k">State</div><div class="flags" id="rFlags"></div></div>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div id="actCard" class="card hidden">
+    <h2>Actions</h2>
+    <div class="grid2">
+      <button id="btnForce" class="ghost">Force uplink now</button>
+      <button id="btnInstall" class="ghost">Start install mode</button>
+    </div>
+    <p class="hint">Install mode speeds up GPS and uplinks for 15 minutes, then returns to normal.</p>
+  </div>
+
+  <!-- Settings -->
+  <div id="cfgCard" class="card hidden">
+    <h2>Settings</h2>
+
+    <details open>
+      <summary>Reporting intervals</summary>
+      <div class="row">
+        <div class="field"><label>Sample every (sec)</label><input id="cSample" type="number" min="1"></div>
+        <div class="field"><label>Uplink every (sec)</label><input id="cUplink" type="number" min="1"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>GPS fix every (sec)</label><input id="cGps" type="number" min="1"></div>
+        <button id="btnIntervals">Apply</button>
+      </div>
+    </details>
+
+    <details>
+      <summary>Movement sensitivity</summary>
+      <div class="row">
+        <div class="field"><label>GPS movement threshold (m)</label><input id="cMove" type="number" step="0.1" min="0"></div>
+        <div class="field"><label>Accelerometer (milli-g)</label><input id="cAccel" type="number" min="0"></div>
+        <button id="btnSens">Apply</button>
+      </div>
+      <p class="hint">For slow equipment, GPS movement is the reliable signal; the accelerometer flags start-up.</p>
+    </details>
+
+    <details>
+      <summary>Sensor</summary>
+      <div class="row">
+        <div class="field"><label>Slot</label>
+          <select id="sIdx"><option>0</option><option>1</option><option>2</option><option>3</option></select></div>
+        <div class="field"><label>Type</label>
+          <select id="sType"><option value="0">None</option><option value="1">4-20mA</option>
+            <option value="2">RS485</option><option value="3">SDI-12</option></select></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Name</label><input id="sName" maxlength="15" placeholder="e.g. Pump pressure"></div>
+        <button id="btnSensor">Apply type & name</button>
+      </div>
+      <h2 style="margin-top:14px">Pressure calibration (2-point)</h2>
+      <div class="row">
+        <div class="field"><label>Raw ADC @ low</label><input id="calRawLo" type="number"></div>
+        <div class="field"><label>Value @ low (psi)</label><input id="calValLo" type="number" step="0.1" value="0"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Raw ADC @ high</label><input id="calRawHi" type="number"></div>
+        <div class="field"><label>Value @ high (psi)</label><input id="calValHi" type="number" step="0.1" value="145"></div>
+      </div>
+      <button id="btnCal" class="block">Apply calibration</button>
+      <p class="hint">At 0 psi, read the live raw value and enter it as “Raw ADC @ low”.</p>
+    </details>
+
+    <details>
+      <summary>LoRaWAN</summary>
+      <div class="row">
+        <div class="field"><label>Class</label>
+          <select id="cClass"><option value="0">A</option><option value="2">C</option></select></div>
+        <div class="field"><label>ADR</label>
+          <select id="cAdr"><option value="1">On</option><option value="0">Off</option></select></div>
+        <button id="btnLora">Apply</button>
+      </div>
+      <p class="hint">Activation is OTAA. Provide the three keys below, then reboot the device to join.</p>
+      <div class="field" style="margin-bottom:10px"><label>DevEUI (16 hex)</label><input id="kDev" placeholder="0011223344556677"></div>
+      <div class="field" style="margin-bottom:10px"><label>AppEUI / JoinEUI (16 hex)</label><input id="kApp" placeholder="0000000000000000"></div>
+      <div class="field" style="margin-bottom:10px"><label>AppKey (32 hex)</label><input id="kKey" placeholder="00112233...ffeeddcc"></div>
+      <button id="btnKeys" class="block">Write keys</button>
+    </details>
+
+    <details>
+      <summary>Backup</summary>
+      <button id="btnExport" class="ghost block">Read current config</button>
+      <pre id="exportOut" class="hint" style="font-family:var(--mono);white-space:pre-wrap;margin-top:10px"></pre>
+    </details>
+  </div>
+</main>
+
+<div id="log"></div>
+
+<script>
+"use strict";
+// ---- GATT profile (must match firmware) ----
+const SVC  = "e54b0001-67f5-479e-8711-b3b99198ce6c";
+const AUTH = "e54b0002-67f5-479e-8711-b3b99198ce6c";
+const CFG  = "e54b0003-67f5-479e-8711-b3b99198ce6c";
+const STAT = "e54b0004-67f5-479e-8711-b3b99198ce6c";
+const EXP  = "e54b0005-67f5-479e-8711-b3b99198ce6c";
+
+// Command IDs (match firmware)
+const C = {
+  UPLINK:0x01, SAMPLE:0x02, GPS:0x03, CLASS:0x04, ADR:0x05, ACCEL:0x06, MOVE:0x07,
+  DEVEUI:0x10, APPEUI:0x11, APPKEY:0x12,
+  S_TYPE:0x20, S_NAME:0x21, S_CAL:0x22,
+  FORCE:0x30, INSTALL:0x31, EXPORT:0x40
+};
+
+let device=null, gatt=null, chAuth=null, chCfg=null, chStat=null, chExp=null;
+
+// ---- helpers ----
+const $=id=>document.getElementById(id);
+function log(msg,cls=""){const d=document.createElement("div");if(cls)d.className=cls;
+  d.textContent=msg;const l=$("log");l.appendChild(d);l.scrollTop=l.scrollHeight;}
+function u8(n){return [n&0xff];}
+function be16(n){return [(n>>8)&0xff,n&0xff];}
+function be32(n){return [(n>>>24)&0xff,(n>>>16)&0xff,(n>>>8)&0xff,n&0xff];}
+function i16be(n){n=Math.round(n);if(n<0)n=0x10000+n;return [(n>>8)&0xff,n&0xff];}
+function hexBytes(s){s=(s||"").replace(/[^0-9a-fA-F]/g,"");const o=[];
+  for(let i=0;i+1<s.length;i+=2)o.push(parseInt(s.substr(i,2),16));return o;}
+
+async function writeCfg(bytes){
+  if(!chCfg){log("Not connected.","e");return;}
+  const buf=new Uint8Array(bytes);
+  try{
+    if(chCfg.writeValueWithResponse) await chCfg.writeValueWithResponse(buf);
+    else await chCfg.writeValue(buf);
+  }catch(err){log("Write failed: "+err.message,"e");}
+}
+
+// ---- connect ----
+async function connect(){
+  if(!navigator.bluetooth){$("unsupported").classList.remove("hidden");return;}
+  try{
+    log("Requesting device…");
+    device=await navigator.bluetooth.requestDevice({
+      filters:[{services:[SVC]},{namePrefix:"RAK4631"}],
+      optionalServices:[SVC]
+    });
+    device.addEventListener("gattserverdisconnected",onDisconnect);
+    log("Connecting…");
+    gatt=await device.gatt.connect();
+    const svc=await gatt.getPrimaryService(SVC);
+    chAuth=await svc.getCharacteristic(AUTH);
+    chCfg =await svc.getCharacteristic(CFG);
+    chStat=await svc.getCharacteristic(STAT);
+    try{chExp=await svc.getCharacteristic(EXP);}catch(e){chExp=null;}
+    await chStat.startNotifications();
+    chStat.addEventListener("characteristicvaluechanged",onStatus);
+    setConnected(true);
+    log("Connected. Enter the PIN to unlock.","s");
+  }catch(err){log("Connect cancelled/failed: "+err.message,"e");}
+}
+function onDisconnect(){setConnected(false);log("Device disconnected.","e");}
+
+function setConnected(on){
+  const chip=$("conn");
+  chip.classList.toggle("on",on);
+  $("connText").textContent=on?(device?.name||"Connected"):"Disconnected";
+  $("connectCard").classList.toggle("hidden",on);
+  $("authCard").classList.toggle("hidden",!on);
+  if(!on){["readCard","actCard","cfgCard"].forEach(i=>$(i).classList.add("hidden"));}
+}
+function setUnlocked(){
+  ["readCard","actCard","cfgCard"].forEach(i=>$(i).classList.remove("hidden"));
+}
+
+// ---- auth ----
+async function unlock(){
+  const pin=parseInt($("pin").value,10);
+  if(!Number.isFinite(pin)){log("Enter a numeric PIN.","e");return;}
+  try{
+    const buf=new Uint8Array(be32(pin));
+    if(chAuth.writeValueWithResponse) await chAuth.writeValueWithResponse(buf);
+    else await chAuth.writeValue(buf);
+    log("PIN sent. If correct, settings are now active.","s");
+    setUnlocked();
+  }catch(err){log("Unlock failed: "+err.message,"e");}
+}
+
+// ---- live status (20 bytes, big-endian) ----
+let pulseT=null;
+function onStatus(e){
+  const v=e.target.value; if(v.byteLength<20) return;
+  const joined=v.getUint8(0), flags=v.getUint8(1), inst=v.getUint8(2), batt=v.getUint8(3);
+  const buf=v.getUint32(4,false);
+  const lat=v.getInt32(8,false)/1e7, lon=v.getInt32(12,false)/1e7;
+  const psi=v.getInt16(16,false)/10, sats=v.getUint8(18);
+  $("rJoin").textContent=joined?"Joined":"Not joined";
+  $("rBatt").innerHTML=batt+"<small>%</small>";
+  $("rPsi").innerHTML=psi.toFixed(1)+" <small>psi</small>";
+  $("rSats").textContent=sats;
+  $("rLat").textContent=(flags&0x01)?lat.toFixed(5):"—";
+  $("rLon").textContent=(flags&0x01)?lon.toFixed(5):"—";
+  $("rBuf").textContent=buf;
+  $("rInst").textContent=inst?"On":"Off";
+  const f=[]; f.push(tag("GPS fix",flags&0x01));
+  f.push(tag("Moving",flags&0x08)); f.push(tag("Motion",flags&0x02));
+  $("rFlags").innerHTML=f.join("");
+  $("btnInstall").textContent=inst?"Stop install mode":"Start install mode";
+  const p=$("pulse"); p.classList.add("live");
+  clearTimeout(pulseT); pulseT=setTimeout(()=>p.classList.remove("live"),300);
+}
+function tag(name,on){return `<span class="tag${on?" hot":""}">${name}</span>`;}
+
+// ---- export (DeviceConfig is little-endian on the device) ----
+async function readConfig(){
+  if(!chExp){log("Export not available.","e");return;}
+  await writeCfg([C.EXPORT]);              // ask device to populate EXPORT
+  await new Promise(r=>setTimeout(r,250));
+  try{
+    const v=await chExp.readValue();
+    if(v.byteLength<56){$("exportOut").textContent="(empty — unlock with the config PIN first)";return;}
+    const cls=v.getUint8(5), keys=v.getUint8(6), adr=v.getUint8(7);
+    const up=v.getUint32(8,true), sa=v.getUint32(12,true), gp=v.getUint32(16,true);
+    const mg=v.getUint16(20,true), mv=v.getUint16(22,true);
+    let s=`class: ${cls===2?"C":"A"}   ADR: ${adr?"on":"off"}   keys: ${keys?"set":"none"}\n`;
+    s+=`sample ${sa/1000}s   uplink ${up/1000}s   gps ${gp/1000}s\n`;
+    s+=`accel ${mg} mg   gps-move ${(mv/10).toFixed(1)} m\n`;
+    for(let i=0;i<4;i++){
+      const o=56+i*25, t=v.getUint8(o);
+      if(t===0) continue;
+      let name="";for(let j=0;j<16;j++){const c=v.getUint8(o+1+j);if(!c)break;name+=String.fromCharCode(c);}
+      const rl=v.getInt16(o+17,true), rh=v.getInt16(o+19,true);
+      const vl=v.getInt16(o+21,true)/10, vh=v.getInt16(o+23,true)/10;
+      const tn=["none","4-20mA","RS485","SDI-12"][t]||t;
+      s+=`sensor ${i}: ${tn} "${name}"  cal raw ${rl}->${rh} = ${vl}->${vh}\n`;
+    }
+    $("exportOut").textContent=s;
+    log("Config read (AppKey is never exported).","s");
+  }catch(err){log("Read failed: "+err.message,"e");}
+}
+
+// ---- wire up ----
+$("btnConnect").onclick=connect;
+$("btnAuth").onclick=unlock;
+$("btnForce").onclick=()=>{writeCfg([C.FORCE]);log("Force uplink sent.");};
+$("btnInstall").onclick=()=>{
+  const on=$("btnInstall").textContent.startsWith("Start");
+  writeCfg([C.INSTALL,on?1:0]);log("Install mode "+(on?"started":"stopped")+".");
+};
+$("btnIntervals").onclick=()=>{
+  const s=+$("cSample").value,u=+$("cUplink").value,g=+$("cGps").value;
+  if(s>0)writeCfg([C.SAMPLE,...be32(s)]);
+  if(u>0)writeCfg([C.UPLINK,...be32(u)]);
+  if(g>0)writeCfg([C.GPS,...be32(g)]);
+  log("Intervals applied.");
+};
+$("btnSens").onclick=()=>{
+  const m=+$("cMove").value,a=+$("cAccel").value;
+  if(m>=0)writeCfg([C.MOVE,...be16(Math.round(m*10))]);
+  if(a>=0)writeCfg([C.ACCEL,...be16(Math.round(a))]);
+  log("Sensitivity applied.");
+};
+$("btnSensor").onclick=()=>{
+  const idx=+$("sIdx").value,t=+$("sType").value;
+  writeCfg([C.S_TYPE,idx,t]);
+  const name=$("sName").value||"";
+  const nb=[];for(let i=0;i<name.length&&i<15;i++)nb.push(name.charCodeAt(i)&0xff);
+  writeCfg([C.S_NAME,idx,...nb]);
+  log(`Sensor ${idx} type & name applied.`);
+};
+$("btnCal").onclick=()=>{
+  const idx=+$("sIdx").value;
+  const rl=Math.round(+$("calRawLo").value), rh=Math.round(+$("calRawHi").value);
+  const vl=Math.round((+$("calValLo").value)*10), vh=Math.round((+$("calValHi").value)*10);
+  writeCfg([C.S_CAL,idx,...i16be(rl),...i16be(rh),...i16be(vl),...i16be(vh)]);
+  log(`Sensor ${idx} calibration applied.`);
+};
+$("btnLora").onclick=()=>{
+  writeCfg([C.CLASS,+$("cClass").value]);
+  writeCfg([C.ADR,+$("cAdr").value]);
+  log("Class & ADR applied.");
+};
+$("btnKeys").onclick=()=>{
+  const d=hexBytes($("kDev").value),a=hexBytes($("kApp").value),k=hexBytes($("kKey").value);
+  if(d.length!==8){log("DevEUI must be 8 bytes (16 hex).","e");return;}
+  if(a.length!==8){log("AppEUI must be 8 bytes (16 hex).","e");return;}
+  if(k.length!==16){log("AppKey must be 16 bytes (32 hex).","e");return;}
+  writeCfg([C.DEVEUI,...d]); writeCfg([C.APPEUI,...a]); writeCfg([C.APPKEY,...k]);
+  log("Keys written. Reboot the device to join.","s");
+};
+$("btnExport").onclick=readConfig;
+
+if(!navigator.bluetooth){$("unsupported").classList.remove("hidden");}
+log("Ready. Tap “Connect to device”.");
+</script>
+</body>
+</html>
