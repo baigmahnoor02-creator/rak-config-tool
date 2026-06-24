@@ -86,7 +86,10 @@
     <h1>RAK4631-IIOT</h1>
     <div class="sub">Field Configuration</div>
   </div>
-  <span id="conn" class="chip"><span class="dot"></span><span id="connText">Disconnected</span></span>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span id="conn" class="chip"><span class="dot"></span><span id="connText">Disconnected</span></span>
+    <button id="btnDisc" class="ghost hidden" style="padding:5px 10px;font-size:12px">Disconnect</button>
+  </div>
 </header>
 
 <main>
@@ -288,6 +291,7 @@ function setConnected(on){
   $("connText").textContent=on?(device?.name||"Connected"):"Disconnected";
   $("connectCard").classList.toggle("hidden",on);
   $("authCard").classList.toggle("hidden",!on);
+  $("btnDisc").classList.toggle("hidden",!on);
   if(!on){["readCard","actCard","cfgCard"].forEach(i=>$(i).classList.add("hidden"));}
 }
 function setUnlocked(){
@@ -307,14 +311,14 @@ async function unlock(){
   }catch(err){log("Unlock failed: "+err.message,"e");}
 }
 
-// ---- live status (20 bytes, big-endian) ----
+// ---- live status (20 or 22 bytes, big-endian) ----
 let pulseT=null;
 function onStatus(e){
   const v=e.target.value; if(v.byteLength<20) return;
   const joined=v.getUint8(0), flags=v.getUint8(1), inst=v.getUint8(2), batt=v.getUint8(3);
   const buf=v.getUint32(4,false);
   const lat=v.getInt32(8,false)/1e7, lon=v.getInt32(12,false)/1e7;
- const psi=v.getInt16(16,false)/10, sats=v.getUint8(18);
+  const psi=v.getInt16(16,false)/10, sats=v.getUint8(18);
   const rawAdc=(v.byteLength>=22)?v.getInt16(20,false):null;
   $("rJoin").textContent=joined?"Joined":"Not joined";
   $("rBatt").innerHTML=batt+"<small>%</small>";
@@ -324,7 +328,7 @@ function onStatus(e){
   $("rLon").textContent=(flags&0x01)?lon.toFixed(5):"—";
   $("rBuf").textContent=buf;
   $("rInst").textContent=inst?"On":"Off";
-  if(rawAdc!==null) $("rRaw").textContent=rawAdc;
+  $("rRaw").textContent=(rawAdc!==null)?rawAdc:"— (update firmware)";
   const f=[]; f.push(tag("GPS fix",flags&0x01));
   f.push(tag("Moving",flags&0x08)); f.push(tag("Motion",flags&0x02));
   $("rFlags").innerHTML=f.join("");
@@ -364,6 +368,7 @@ async function readConfig(){
 
 // ---- wire up ----
 $("btnConnect").onclick=connect;
+$("btnDisc").onclick=()=>{ if(device&&device.gatt.connected) device.gatt.disconnect(); };
 $("btnAuth").onclick=unlock;
 $("btnForce").onclick=()=>{writeCfg([C.FORCE]);log("Force uplink sent.");};
 $("btnInstall").onclick=()=>{
