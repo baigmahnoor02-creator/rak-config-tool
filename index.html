@@ -59,6 +59,8 @@
   button{font:inherit;font-size:15px;font-weight:600;border:0;border-radius:8px;
          padding:11px 16px;cursor:pointer;background:var(--accent);color:var(--accent-ink)}
   button.ghost{background:#fff;color:var(--ink);border:1px solid var(--line);font-weight:500}
+  button.sm{padding:10px 12px;font-size:13px}
+  button.danger{background:#fff;color:var(--err);border:1px solid #e7c3bd;font-weight:500}
   button.block{width:100%}
   button:disabled{opacity:.5;cursor:not-allowed}
   .big{font-size:17px;padding:16px}
@@ -131,6 +133,7 @@
       <div class="cell"><div class="k">Raw ADC (4-20mA)</div><div class="v" id="rRaw">—</div></div>
       <div class="cell wide"><div class="k">State</div><div class="flags" id="rFlags"></div></div>
     </div>
+    <p class="hint">Readings update automatically every few seconds — no need to refresh.</p>
   </div>
 
   <!-- Actions -->
@@ -182,17 +185,25 @@
         <div class="field"><label>Name</label><input id="sName" maxlength="15" placeholder="e.g. Pump pressure"></div>
         <button id="btnSensor">Apply type & name</button>
       </div>
-      <h2 style="margin-top:14px">Pressure calibration (2-point)</h2>
       <div class="row">
-        <div class="field"><label>Raw ADC @ low</label><input id="calRawLo" type="number"></div>
-        <div class="field"><label>Value @ low (psi)</label><input id="calValLo" type="number" step="0.1" value="0"></div>
+        <button id="btnDelSensor" class="danger sm">Delete sensor (set to None)</button>
+      </div>
+
+      <h2 style="margin-top:14px">4-20 mA calibration (2-point)</h2>
+      <p class="hint" style="margin-top:0">Standard current loop: 4 mA = zero, 20 mA = full-scale. Connect the sensor,
+        then use <b>Fetch</b> to capture the live raw value at each point.</p>
+      <div class="row">
+        <div class="field"><label>Raw ADC @ 4 mA (zero)</label><input id="calRawLo" type="number"></div>
+        <div class="field"><label>Value @ 4 mA</label><input id="calValLo" type="number" step="0.1" value="0"></div>
+        <button id="btnFetchLo" class="ghost sm">Fetch</button>
       </div>
       <div class="row">
-        <div class="field"><label>Raw ADC @ high</label><input id="calRawHi" type="number"></div>
-        <div class="field"><label>Value @ high (psi)</label><input id="calValHi" type="number" step="0.1" value="145"></div>
+        <div class="field"><label>Raw ADC @ 20 mA (full scale)</label><input id="calRawHi" type="number"></div>
+        <div class="field"><label>Full-scale value (psi)</label><input id="calValHi" type="number" step="0.1" value="145"></div>
+        <button id="btnFetchHi" class="ghost sm">Fetch</button>
       </div>
       <button id="btnCal" class="block">Apply calibration</button>
-      <p class="hint">At 0 psi, read the live raw value and enter it as “Raw ADC @ low”.</p>
+      <p class="hint">At 0 psi (4 mA), tap Fetch on the first row. At a known pressure (or full scale), tap Fetch on the second row and set the full-scale value.</p>
     </details>
 
     <details>
@@ -239,6 +250,7 @@ const C = {
 };
 
 let device=null, gatt=null, chAuth=null, chCfg=null, chStat=null, chExp=null;
+let g_lastRaw=null;          // most recent live raw ADC
 
 // ---- helpers ----
 const $=id=>document.getElementById(id);
@@ -251,13 +263,19 @@ function i16be(n){n=Math.round(n);if(n<0)n=0x10000+n;return [(n>>8)&0xff,n&0xff]
 function hexBytes(s){s=(s||"").replace(/[^0-9a-fA-F]/g,"");const o=[];
   for(let i=0;i+1<s.length;i+=2)o.push(parseInt(s.substr(i,2),16));return o;}
 
-async function writeCfg(bytes){
-  if(!chCfg){log("Not connected.","e");return;}
-  const buf=new Uint8Array(bytes);
-  try{
-    if(chCfg.writeValueWithResponse) await chCfg.writeValueWithResponse(buf);
-    else await chCfg.writeValue(buf);
-  }catch(err){log("Write failed: "+err.message,"e");}
+// Serialize all CONFIG writes so they never overlap (fixes "GATT operation
+// already in progress" when several values are sent in one tap).
+let writeChain=Promise.resolve();
+function writeCfg(bytes){
+  writeChain=writeChain.then(async()=>{
+    if(!chCfg){log("Not connected.","e");return;}
+    const buf=new Uint8Array(bytes);
+    try{
+      if(chCfg.writeValueWithResponse) await chCfg.writeValueWithResponse(buf);
+      else await chCfg.writeValue(buf);
+    }catch(err){log("Write failed: "+err.message,"e");}
+  });
+  return writeChain;
 }
 
 // ---- connect ----
@@ -320,6 +338,7 @@ function onStatus(e){
   const lat=v.getInt32(8,false)/1e7, lon=v.getInt32(12,false)/1e7;
   const psi=v.getInt16(16,false)/10, sats=v.getUint8(18);
   const rawAdc=(v.byteLength>=22)?v.getInt16(20,false):null;
+  g_lastRaw=rawAdc;
   $("rJoin").textContent=joined?"Joined":"Not joined";
   $("rBatt").innerHTML=batt+"<small>%</small>";
   $("rPsi").innerHTML=psi.toFixed(1)+" <small>psi</small>";
@@ -390,11 +409,24 @@ $("btnSens").onclick=()=>{
 };
 $("btnSensor").onclick=()=>{
   const idx=+$("sIdx").value,t=+$("sType").value;
-  writeCfg([C.S_TYPE,idx,t]);
+  writeCfg([C.S_TYPE,idx,t]);                       // queued
   const name=$("sName").value||"";
   const nb=[];for(let i=0;i<name.length&&i<15;i++)nb.push(name.charCodeAt(i)&0xff);
-  writeCfg([C.S_NAME,idx,...nb]);
+  writeCfg([C.S_NAME,idx,...nb]);                    // queued after the first
   log(`Sensor ${idx} type & name applied.`);
+};
+$("btnDelSensor").onclick=()=>{
+  const idx=+$("sIdx").value;
+  writeCfg([C.S_TYPE,idx,0]);
+  log(`Sensor ${idx} deleted (set to None).`);
+};
+$("btnFetchLo").onclick=()=>{
+  if(g_lastRaw===null){log("No live raw value yet (connect + update firmware).","e");return;}
+  $("calRawLo").value=g_lastRaw; log("Captured raw "+g_lastRaw+" as 4 mA / zero point.");
+};
+$("btnFetchHi").onclick=()=>{
+  if(g_lastRaw===null){log("No live raw value yet (connect + update firmware).","e");return;}
+  $("calRawHi").value=g_lastRaw; log("Captured raw "+g_lastRaw+" as 20 mA / full-scale point.");
 };
 $("btnCal").onclick=()=>{
   const idx=+$("sIdx").value;
