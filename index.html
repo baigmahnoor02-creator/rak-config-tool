@@ -90,6 +90,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="conn" class="chip"><span class="dot"></span><span id="connText">Disconnected</span></span>
+    <button id="btnHelp" class="ghost" style="padding:5px 10px;font-size:12px">Help</button>
     <button id="btnDisc" class="ghost hidden" style="padding:5px 10px;font-size:12px">Disconnect</button>
   </div>
 </header>
@@ -98,6 +99,22 @@
   <div id="unsupported" class="unsupported hidden">
     This browser doesn't support Web Bluetooth. On Android use <b>Chrome</b>; on iPhone use the
     <b>Bluefly/Bluefy</b> browser. The page must be opened over <b>https</b>.
+  </div>
+
+
+  <!-- Help -->
+  <div id="helpCard" class="card hidden">
+    <h2>How to use this tool</h2>
+    <ol style="margin:0;padding-left:20px">
+      <li style="margin-bottom:6px"><b>Connect:</b> power on the node, tap <b>Connect to device</b>, and pick <b>RAK4631-IIOT</b>.</li>
+      <li style="margin-bottom:6px"><b>Unlock:</b> enter the PIN (config PIN gives full access; read-only PIN shows diagnostics only) and tap <b>Unlock</b>.</li>
+      <li style="margin-bottom:6px"><b>Live readout:</b> readings refresh automatically every few seconds (network, battery, pressure, raw ADC, GPS, motion).</li>
+      <li style="margin-bottom:6px"><b>4-20 mA calibration:</b> in <b>Sensor</b>, set type 4-20mA. At 0 psi tap <b>Fetch</b> on the first row (zero). At a known/full-scale pressure tap <b>Fetch</b> on the second row and set the full-scale value, then <b>Apply calibration</b>.</li>
+      <li style="margin-bottom:6px"><b>Intervals &amp; actions:</b> adjust sample/uplink/GPS timing; use <b>Force uplink</b> or <b>Install mode</b> for commissioning.</li>
+      <li style="margin-bottom:6px"><b>LoRaWAN:</b> enter OTAA keys (DevEUI, AppEUI, AppKey), set Class/ADR, write keys, then reboot to join.</li>
+      <li><b>Backup:</b> tap <b>Read current config</b> to review settings (the AppKey is never exported).</li>
+    </ol>
+    <p class="hint">Tip: use Android Chrome over https. Keep Bluetooth on. Tap <b>Help</b> again to close.</p>
   </div>
 
   <!-- Connect -->
@@ -169,7 +186,11 @@
         <div class="field"><label>Accelerometer (milli-g)</label><input id="cAccel" type="number" min="0"></div>
         <button id="btnSens">Apply</button>
       </div>
-      <p class="hint">For slow equipment, GPS movement is the reliable signal; the accelerometer flags start-up.</p>
+      <div class="row">
+        <div class="field"><label>GPS minimum satellites for valid fix</label><input id="cMinSats" type="number" min="3" max="12" placeholder="e.g. 5"></div>
+        <button id="btnMinSats">Apply</button>
+      </div>
+      <p class="hint">For slow equipment, GPS movement is the reliable signal; the accelerometer flags start-up. A higher minimum-satellites value gives a more reliable position fix (it may take a little longer to lock).</p>
     </details>
 
     <details>
@@ -243,7 +264,7 @@ const EXP  = "e54b0005-67f5-479e-8711-b3b99198ce6c";
 
 // Command IDs (match firmware)
 const C = {
-  UPLINK:0x01, SAMPLE:0x02, GPS:0x03, CLASS:0x04, ADR:0x05, ACCEL:0x06, MOVE:0x07,
+  UPLINK:0x01, SAMPLE:0x02, GPS:0x03, CLASS:0x04, ADR:0x05, ACCEL:0x06, MOVE:0x07, MINSATS:0x08,
   DEVEUI:0x10, APPEUI:0x11, APPKEY:0x12,
   S_TYPE:0x20, S_NAME:0x21, S_CAL:0x22,
   FORCE:0x30, INSTALL:0x31, EXPORT:0x40
@@ -380,6 +401,7 @@ async function readConfig(){
       const tn=["none","4-20mA","RS485","SDI-12"][t]||t;
       s+=`sensor ${i}: ${tn} "${name}"  cal raw ${rl}->${rh} = ${vl}->${vh}\n`;
     }
+    if(v.byteLength>=157){ s+=`gps min sats: ${v.getUint8(156)}\n`; }
     $("exportOut").textContent=s;
     log("Config read (AppKey is never exported).","s");
   }catch(err){log("Read failed: "+err.message,"e");}
@@ -387,6 +409,7 @@ async function readConfig(){
 
 // ---- wire up ----
 $("btnConnect").onclick=connect;
+$("btnHelp").onclick=()=>{ $("helpCard").classList.toggle("hidden"); };
 $("btnDisc").onclick=()=>{ if(device&&device.gatt.connected) device.gatt.disconnect(); };
 $("btnAuth").onclick=unlock;
 $("btnForce").onclick=()=>{writeCfg([C.FORCE]);log("Force uplink sent.");};
@@ -406,6 +429,11 @@ $("btnSens").onclick=()=>{
   if(m>=0)writeCfg([C.MOVE,...be16(Math.round(m*10))]);
   if(a>=0)writeCfg([C.ACCEL,...be16(Math.round(a))]);
   log("Sensitivity applied.");
+};
+$("btnMinSats").onclick=()=>{
+  const s=Math.round(+$("cMinSats").value);
+  if(s>=3&&s<=12){ writeCfg([C.MINSATS,s&0xff]); log("GPS minimum satellites = "+s+"."); }
+  else { log("Enter a value between 3 and 12.","e"); }
 };
 $("btnSensor").onclick=()=>{
   const idx=+$("sIdx").value,t=+$("sType").value;
