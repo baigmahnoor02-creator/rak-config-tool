@@ -318,11 +318,12 @@ async function connect(){
     try{chExp=await svc.getCharacteristic(EXP);}catch(e){chExp=null;}
     await chStat.startNotifications();
     chStat.addEventListener("characteristicvaluechanged",onStatus);
+    startStatusPoll();
     setConnected(true);
     log("Connected. Enter the PIN to unlock.","s");
   }catch(err){log("Connect cancelled/failed: "+err.message,"e");}
 }
-function onDisconnect(){setConnected(false);log("Device disconnected.","e");}
+function onDisconnect(){stopStatusPoll();setConnected(false);log("Device disconnected.","e");}
 
 function setConnected(on){
   const chip=$("conn");
@@ -331,7 +332,7 @@ function setConnected(on){
   $("connectCard").classList.toggle("hidden",on);
   $("authCard").classList.toggle("hidden",!on);
   $("btnDisc").classList.toggle("hidden",!on);
-  if(!on){["readCard","actCard","cfgCard"].forEach(i=>$(i).classList.add("hidden"));}
+  if(!on){ stopStatusPoll(); ["readCard","actCard","cfgCard"].forEach(i=>$(i).classList.add("hidden")); }
 }
 function setUnlocked(){
   ["readCard","actCard","cfgCard"].forEach(i=>$(i).classList.remove("hidden"));
@@ -352,8 +353,9 @@ async function unlock(){
 
 // ---- live status (20 or 22 bytes, big-endian) ----
 let pulseT=null;
-function onStatus(e){
-  const v=e.target.value; if(v.byteLength<20) return;
+function onStatus(e){ renderStatus(e.target.value); }
+function renderStatus(v){
+  if(v.byteLength<20) return;
   const joined=v.getUint8(0), flags=v.getUint8(1), inst=v.getUint8(2), batt=v.getUint8(3);
   const buf=v.getUint32(4,false);
   const lat=v.getInt32(8,false)/1e7, lon=v.getInt32(12,false)/1e7;
@@ -368,7 +370,7 @@ function onStatus(e){
   $("rLon").textContent=(flags&0x01)?lon.toFixed(5):"—";
   $("rBuf").textContent=buf;
   $("rInst").textContent=inst?"On":"Off";
-  $("rRaw").textContent=(rawAdc!==null)?rawAdc:"— (update firmware)";
+  if(rawAdc!==null) $("rRaw").textContent=rawAdc;
   const f=[]; f.push(tag("GPS fix",flags&0x01));
   f.push(tag("Moving",flags&0x08)); f.push(tag("Motion",flags&0x02));
   $("rFlags").innerHTML=f.join("");
@@ -377,6 +379,19 @@ function onStatus(e){
   clearTimeout(pulseT); pulseT=setTimeout(()=>p.classList.remove("live"),300);
 }
 function tag(name,on){return `<span class="tag${on?" hot":""}">${name}</span>`;}
+
+// Some phones cap BLE notifications at 20 bytes (default MTU), which would drop
+// the last 2 bytes (raw ADC). A GATT read returns the full value, so we also
+// poll the STATUS characteristic directly to guarantee raw ADC arrives.
+let statusPoll=null;
+function startStatusPoll(){
+  stopStatusPoll();
+  statusPoll=setInterval(async()=>{
+    if(!chStat) return;
+    try{ const v=await chStat.readValue(); renderStatus(v); }catch(e){}
+  },2000);
+}
+function stopStatusPoll(){ if(statusPoll){clearInterval(statusPoll);statusPoll=null;} }
 
 // ---- export (DeviceConfig is little-endian on the device) ----
 async function readConfig(){
