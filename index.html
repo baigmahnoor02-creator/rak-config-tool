@@ -129,7 +129,7 @@
     <h2>Unlock</h2>
     <div class="row">
       <div class="field"><label for="pin">PIN</label>
-        <input id="pin" type="number" inputmode="numeric" placeholder="e.g. 4321"></div>
+        <input id="pin" type="number" inputmode="numeric"></div>
       <button id="btnAuth">Unlock</button>
     </div>
     <p class="hint">Config PIN gives full access; read-only PIN shows diagnostics only.</p>
@@ -211,20 +211,22 @@
       </div>
 
       <h2 style="margin-top:14px">4-20 mA calibration (2-point)</h2>
-      <p class="hint" style="margin-top:0">Standard current loop: 4 mA = zero, 20 mA = full-scale. Connect the sensor,
-        then use <b>Fetch</b> to capture the live raw value at each point.</p>
+      <p class="hint" style="margin-top:0">Standard current loop: 4 mA = zero, 20 mA = full-scale. Enter the raw ADC at each point.
+        Use <b>Fetch current value</b> to read the live raw ADC now, then type it into the matching row.</p>
+      <div class="row">
+        <div class="field"><label>Current raw ADC (live)</label><input id="calRawLive" type="number" readonly></div>
+        <button id="btnFetch" class="ghost sm">Fetch current value</button>
+      </div>
       <div class="row">
         <div class="field"><label>Raw ADC @ 4 mA (zero)</label><input id="calRawLo" type="number"></div>
         <div class="field"><label>Value @ 4 mA</label><input id="calValLo" type="number" step="0.1" value="0"></div>
-        <button id="btnFetchLo" class="ghost sm">Fetch</button>
       </div>
       <div class="row">
         <div class="field"><label>Raw ADC @ 20 mA (full scale)</label><input id="calRawHi" type="number"></div>
         <div class="field"><label>Full-scale value (psi)</label><input id="calValHi" type="number" step="0.1" value="145"></div>
-        <button id="btnFetchHi" class="ghost sm">Fetch</button>
       </div>
       <button id="btnCal" class="block">Apply calibration</button>
-      <p class="hint">At 0 psi (4 mA), tap Fetch on the first row. At a known pressure (or full scale), tap Fetch on the second row and set the full-scale value.</p>
+      <p class="hint">At 0 psi, tap Fetch current value and enter it as Raw ADC @ 4 mA. At a known/full-scale pressure, tap Fetch again and enter it as Raw ADC @ 20 mA with the value.</p>
     </details>
 
     <details>
@@ -272,6 +274,8 @@ const C = {
 
 let device=null, gatt=null, chAuth=null, chCfg=null, chStat=null, chExp=null;
 let g_lastRaw=null;          // most recent live raw ADC
+let g_slotUsed=[false,false,false,false];  // which sensor slots are occupied
+let g_pinCheck=false, g_pinOK=false;
 
 // ---- helpers ----
 const $=id=>document.getElementById(id);
@@ -346,8 +350,11 @@ async function unlock(){
     const buf=new Uint8Array(be32(pin));
     if(chAuth.writeValueWithResponse) await chAuth.writeValueWithResponse(buf);
     else await chAuth.writeValue(buf);
-    log("PIN sent. If correct, settings are now active.","s");
+    log("PIN sent.","s");
     setUnlocked();
+    // Verify: after a correct PIN the device streams non-zero diagnostics.
+    g_pinCheck=true; g_pinOK=false;
+    setTimeout(()=>{ if(g_pinCheck && !g_pinOK) log("If readings stay blank, the PIN may be incorrect - re-enter it.","e"); g_pinCheck=false; }, 3500);
   }catch(err){log("Unlock failed: "+err.message,"e");}
 }
 
@@ -361,7 +368,9 @@ function renderStatus(v){
   const lat=v.getInt32(8,false)/1e7, lon=v.getInt32(12,false)/1e7;
   const psi=v.getInt16(16,false)/10, sats=v.getUint8(18);
   const rawAdc=(v.byteLength>=22)?v.getInt16(20,false):null;
+  if(v.getUint8(3)!==0 || v.getUint8(0)!==0 || v.getUint32(4,false)!==0) g_pinOK=true;
   g_lastRaw=rawAdc;
+  if(rawAdc!==null){ const lv=$("calRawLive"); if(lv) lv.value=rawAdc; }
   $("rJoin").textContent=joined?"Joined":"Not joined";
   $("rBatt").innerHTML=batt+"<small>%</small>";
   $("rPsi").innerHTML=psi.toFixed(1)+" <small>psi</small>";
@@ -409,6 +418,7 @@ async function readConfig(){
     s+=`accel ${mg} mg   gps-move ${(mv/10).toFixed(1)} m\n`;
     for(let i=0;i<4;i++){
       const o=56+i*25, t=v.getUint8(o);
+      g_slotUsed[i]=(t!==0);
       if(t===0) continue;
       let name="";for(let j=0;j<16;j++){const c=v.getUint8(o+1+j);if(!c)break;name+=String.fromCharCode(c);}
       const rl=v.getInt16(o+17,true), rh=v.getInt16(o+19,true);
@@ -452,24 +462,31 @@ $("btnMinSats").onclick=()=>{
 };
 $("btnSensor").onclick=()=>{
   const idx=+$("sIdx").value,t=+$("sType").value;
-  writeCfg([C.S_TYPE,idx,t]);                       // queued
+  // If the slot is already in use and the user is trying to set a (different) type,
+  // block it - they should delete it first. Renaming is always allowed.
+  if(g_slotUsed[idx] && t!==0){
+    log(`Slot ${idx} is already in use. Delete the sensor first, or just change its name.`,"e");
+    // still allow a name update
+    const name0=$("sName").value||"";
+    if(name0){ const nb0=[];for(let i=0;i<name0.length&&i<15;i++)nb0.push(name0.charCodeAt(i)&0xff); writeCfg([C.S_NAME,idx,...nb0]); log(`Sensor ${idx} name updated.`); }
+    return;
+  }
+  writeCfg([C.S_TYPE,idx,t]);
   const name=$("sName").value||"";
   const nb=[];for(let i=0;i<name.length&&i<15;i++)nb.push(name.charCodeAt(i)&0xff);
-  writeCfg([C.S_NAME,idx,...nb]);                    // queued after the first
+  writeCfg([C.S_NAME,idx,...nb]);
+  if(t!==0) g_slotUsed[idx]=true;
   log(`Sensor ${idx} type & name applied.`);
 };
 $("btnDelSensor").onclick=()=>{
   const idx=+$("sIdx").value;
   writeCfg([C.S_TYPE,idx,0]);
+  g_slotUsed[idx]=false;
   log(`Sensor ${idx} deleted (set to None).`);
 };
-$("btnFetchLo").onclick=()=>{
-  if(g_lastRaw===null){log("No live raw value yet (connect + update firmware).","e");return;}
-  $("calRawLo").value=g_lastRaw; log("Captured raw "+g_lastRaw+" as 4 mA / zero point.");
-};
-$("btnFetchHi").onclick=()=>{
-  if(g_lastRaw===null){log("No live raw value yet (connect + update firmware).","e");return;}
-  $("calRawHi").value=g_lastRaw; log("Captured raw "+g_lastRaw+" as 20 mA / full-scale point.");
+$("btnFetch").onclick=()=>{
+  if(g_lastRaw===null){log("No live raw value yet - connect and unlock first.","e");return;}
+  $("calRawLive").value=g_lastRaw; log("Current live raw ADC = "+g_lastRaw+".");
 };
 $("btnCal").onclick=()=>{
   const idx=+$("sIdx").value;
